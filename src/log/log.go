@@ -12,6 +12,7 @@
 // printed does not end in a newline, the logger will add one.
 // The Fatal functions call os.Exit(1) after writing the log message.
 // The Panic functions call panic after writing the log message.
+
 package log
 
 import (
@@ -34,6 +35,13 @@ import (
 //	2009/01/23 01:23:23 message
 // while flags Ldate | Ltime | Lmicroseconds | Llongfile produce,
 //	2009/01/23 01:23:23.123123 /a/b/c/d.go:23: message
+
+//TODO 此处使用了位掩码的方式
+//iota 会在每行加1 ,并执行同一个表达式 1<< iota
+//   1<<iota  =    00001
+//   1<< iota =    00010
+//    1<<iota =    00100
+
 const (
 	Ldate         = 1 << iota     // the date in the local time zone: 2009/01/23
 	Ltime                         // the time in the local time zone: 01:23:23
@@ -49,12 +57,17 @@ const (
 // output to an io.Writer. Each logging operation makes a single call to
 // the Writer's Write method. A Logger can be used simultaneously from
 // multiple goroutines; it guarantees to serialize access to the Writer.
+
+//一个活动的记录日志的 对象
 type Logger struct {
+	//保证日志写入操作的原子性
 	mu     sync.Mutex // ensures atomic writes; protects the following fields
 	prefix string     // prefix on each line to identify the logger (but see Lmsgprefix)
-	flag   int        // properties
-	out    io.Writer  // destination for output
-	buf    []byte     // for accumulating text to write
+	//需要配置的参数
+	flag int // properties
+	//写入的位置
+	out io.Writer // destination for output
+	buf []byte    // for accumulating text to write
 }
 
 // New creates a new Logger. The out variable sets the
@@ -62,6 +75,8 @@ type Logger struct {
 // The prefix appears at the beginning of each generated log line, or
 // after the log header if the Lmsgprefix flag is provided.
 // The flag argument defines the logging properties.
+
+// 输出位置, 前缀会加到每行日志的开头, flag设置日志其他参数(如时间)
 func New(out io.Writer, prefix string, flag int) *Logger {
 	return &Logger{out: out, prefix: prefix, flag: flag}
 }
@@ -73,14 +88,18 @@ func (l *Logger) SetOutput(w io.Writer) {
 	l.out = w
 }
 
+//创建一个默认的 logger
 var std = New(os.Stderr, "", LstdFlags)
 
 // Cheap integer to fixed-width decimal ASCII. Give a negative width to avoid zero-padding.
+//将int型转为 ascii码,wid为宽度
+//TODO 理解其转换思路
 func itoa(buf *[]byte, i int, wid int) {
 	// Assemble decimal in reverse order.
 	var b [20]byte
 	bp := len(b) - 1
 	for i >= 10 || wid > 1 {
+		//20个 byte填完  或者
 		wid--
 		q := i / 10
 		b[bp] = byte('0' + i - q*10)
@@ -98,13 +117,17 @@ func itoa(buf *[]byte, i int, wid int) {
 //   * file and line number (if corresponding flags are provided),
 //   * l.prefix (if it's not blank and Lmsgprefix is set).
 func (l *Logger) formatHeader(buf *[]byte, t time.Time, file string, line int) {
+
+	//如果没设置该参数,前缀加到 前面
 	if l.flag&Lmsgprefix == 0 {
 		*buf = append(*buf, l.prefix...)
 	}
+	//
 	if l.flag&(Ldate|Ltime|Lmicroseconds) != 0 {
 		if l.flag&LUTC != 0 {
 			t = t.UTC()
 		}
+		//如果设置了 Ldate
 		if l.flag&Ldate != 0 {
 			year, month, day := t.Date()
 			itoa(buf, year, 4)
@@ -114,6 +137,7 @@ func (l *Logger) formatHeader(buf *[]byte, t time.Time, file string, line int) {
 			itoa(buf, day, 2)
 			*buf = append(*buf, ' ')
 		}
+		//如果设置了 时间及微妙
 		if l.flag&(Ltime|Lmicroseconds) != 0 {
 			hour, min, sec := t.Clock()
 			itoa(buf, hour, 2)
@@ -128,7 +152,9 @@ func (l *Logger) formatHeader(buf *[]byte, t time.Time, file string, line int) {
 			*buf = append(*buf, ' ')
 		}
 	}
+	//如果设置了  任意一个文件参数
 	if l.flag&(Lshortfile|Llongfile) != 0 {
+		//如果设置了短文件
 		if l.flag&Lshortfile != 0 {
 			short := file
 			for i := len(file) - 1; i > 0; i-- {
@@ -144,6 +170,8 @@ func (l *Logger) formatHeader(buf *[]byte, t time.Time, file string, line int) {
 		itoa(buf, line, -1)
 		*buf = append(*buf, ": "...)
 	}
+
+	//如果设置了该参数,前缀放到 设置的参数后面
 	if l.flag&Lmsgprefix != 0 {
 		*buf = append(*buf, l.prefix...)
 	}
@@ -161,6 +189,9 @@ func (l *Logger) Output(calldepth int, s string) error {
 	var line int
 	l.mu.Lock()
 	defer l.mu.Unlock()
+
+	//如果flag 匹配到了Lshortfile 或者 Llongfile
+	//调用runtime.Caller 获取源文件的 文件和行号
 	if l.flag&(Lshortfile|Llongfile) != 0 {
 		// Release lock while getting caller info - it's expensive.
 		l.mu.Unlock()
@@ -172,9 +203,12 @@ func (l *Logger) Output(calldepth int, s string) error {
 		}
 		l.mu.Lock()
 	}
+
 	l.buf = l.buf[:0]
+	//格式化  前缀
 	l.formatHeader(&l.buf, now, file, line)
 	l.buf = append(l.buf, s...)
+	//如果没有换行符,则末尾添加换行符
 	if len(s) == 0 || s[len(s)-1] != '\n' {
 		l.buf = append(l.buf, '\n')
 	}
